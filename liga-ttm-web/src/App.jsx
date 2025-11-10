@@ -103,7 +103,7 @@ function fmtDate(d) {
 }
 
 /* --------------------------------- APP ---------------------------------- */
-export default function App() {
+export default function App() { 
   // URL de la API (editable en el header)
   const [BASE_URL, setBASE_URL] = useState(BASE_URL_DEFAULT);
 
@@ -144,6 +144,17 @@ const [toast, setToast] = useState({
   tone: "default", // "success" | "warn" | "error" | "default"
 });
 
+// --- Nuevo torneo (modal + formulario) ---
+const [nuevoTorneoOpen, setNuevoTorneoOpen] = useState(false);
+const [nt, setNt] = useState({
+  nombre: "",
+  categoria: "Mayores",              // Mayores | Sub-19 (ajusta a tus categorías)
+  tipoLlave: "eliminacion_simple",   // por ahora solo este tipo
+  fechaInicio: "",                    // yyyy-mm-dd
+  fechaFin: ""                        // yyyy-mm-dd
+});
+
+
 
   // Mapa id->nombre para resolver jugadores en el bracket
   const nameById = useMemo(() => {
@@ -151,6 +162,17 @@ const [toast, setToast] = useState({
     for (const p of players) m.set(String(p._id), p.nombre || "(sin nombre)");
     return m;
   }, [players]);
+
+  // --- Búsqueda de jugadores para la tarjeta ---
+const [playerQuery, setPlayerQuery] = useState("");
+
+// Lista filtrada por nombre (insensible a mayúsculas)
+const filteredPlayers = React.useMemo(() => {
+  const q = playerQuery.trim().toLowerCase();
+  if (!q) return players;
+  return players.filter(p => (p.nombre || "").toLowerCase().includes(q));
+}, [players, playerQuery]);
+
 
   /* --------------------------- carga inicial --------------------------- */
   useEffect(() => {
@@ -224,6 +246,42 @@ const [toast, setToast] = useState({
       setLoading(false);
     }
   }
+
+  // Vuelve a cargar la lista de jugadores desde la API
+async function reloadPlayers() {
+  try {
+    setLoading(true);
+    setError("");
+    const playersRes = await apiGet(`${BASE_URL}/players`); // GET /players
+    setPlayers(playersRes);
+  } catch (e) {
+    setError(String(e.message || e));
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function reloadTournaments(selectNewest = false) {
+  try {
+    setLoading(true);
+    setError("");
+    const tournamentsRes = await apiGet(`${BASE_URL}/tournaments`);
+    setTournaments(tournamentsRes);
+
+    if (selectNewest && tournamentsRes.length > 0) {
+      // Asumiendo que vienen ordenados por createdAt desc (tu API lo hace)
+      const newest = tournamentsRes[0];
+      await loadTournamentData(newest);
+    }
+  } catch (e) {
+    setError(String(e.message || e));
+  } finally {
+    setLoading(false);
+  }
+}
+
+
+
 
   /* --------------------------- resultados --------------------------- */
   function openResultModal(match) {
@@ -320,6 +378,45 @@ const [toast, setToast] = useState({
   }
 }
 
+async function crearTorneo() {
+  // Validaciones simples en el front
+  if (!nt.nombre.trim()) {
+    setToast({ open: true, title: "Faltan datos", message: "El nombre del torneo es obligatorio.", tone: "warn" });
+    return;
+  }
+
+  try {
+    setLoading(true);
+    setError("");
+
+    // Construye el payload respetando campos opcionales
+    const payload = {
+      nombre: nt.nombre,
+      categoria: nt.categoria,
+      tipoLlave: nt.tipoLlave || "eliminacion_simple",
+      fechaInicio: nt.fechaInicio || undefined,
+      fechaFin: nt.fechaFin || undefined,
+    };
+
+    await apiPost(`${BASE_URL}/tournaments`, payload);
+
+    // Cierra modal y limpia
+    setNuevoTorneoOpen(false);
+    setNt({ nombre: "", categoria: "Mayores", tipoLlave: "eliminacion_simple", fechaInicio: "", fechaFin: "" });
+
+    // Refresca lista de torneos
+    await reloadTournaments(true);
+
+    // Aviso de éxito
+    setToast({ open: true, title: "Torneo creado", message: "Torneo creado con éxito.", tone: "success" });
+  } catch (e) {
+    setToast({ open: true, title: "Error al crear torneo", message: String(e.message || e), tone: "error" });
+  } finally {
+    setLoading(false);
+  }
+}
+
+
 
   /* ---------------------------- helpers UI --------------------------- */
   function groupByRound(ms) {
@@ -359,6 +456,10 @@ const [toast, setToast] = useState({
             <Button onClick={() => setNuevoJugadorOpen(true)} disabled={loading}>
               Nuevo jugador
             </Button>
+            <Button onClick={() => setNuevoTorneoOpen(true)} disabled={loading}>
+              Nuevo torneo
+            </Button>
+
           </div>
         </div>
       </header>
@@ -412,7 +513,13 @@ const [toast, setToast] = useState({
             >
               Ranking
             </Button>
-
+            <Button
+              className={tab === "jugadores" ? "bg-gray-900 text-white" : "bg-white"}
+              onClick={() => setTab("jugadores")}
+            >
+            Jugadores
+           </Button>
+           
             {selectedTournament && (
               <>
                 <Badge>Categoria: {selectedCategory || "—"}</Badge>
@@ -565,6 +672,37 @@ const [toast, setToast] = useState({
               )}
             </Card>
           )}
+      {/* TARJETA: Lista de jugadores (vista rápida) */}
+       <Card title="Jugadores (vista rápida)">
+        <div className="flex items-center gap-2 mb-3">
+          <input
+            className="border rounded-xl px-3 py-2 text-sm"
+            placeholder="Buscar jugador por nombre…"
+            value={playerQuery}
+            onChange={(e) => setPlayerQuery(e.target.value)}
+          />
+          <Button onClick={reloadPlayers} disabled={loading}>Refrescar</Button>
+          <Badge>{players.length} jugadores</Badge>
+        </div>
+
+        {filteredPlayers.length === 0 ? (
+          <div className="text-sm text-gray-500">No se encontraron jugadores.</div>
+        ) : (
+          <ul className="text-sm max-h-64 overflow-auto divide-y">
+            {filteredPlayers.map(p => (
+              <li key={p._id} className="py-2 flex items-center justify-between">
+                <span>
+                  {p.nombre}
+                  {p.categoria ? <span className="text-gray-500"> · {p.categoria}</span> : null}
+                </span>
+                {/* opcional: muestra documento si existe */}
+                {p.documento ? <span className="text-xs text-gray-500">{p.documento}</span> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
         </section>
       </main>
 
@@ -682,6 +820,83 @@ const [toast, setToast] = useState({
         </div>
         
       )}
+
+      {nuevoTorneoOpen && (
+  <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-lg">Nuevo torneo</h3>
+        <button
+          className="text-gray-500"
+          onClick={() => setNuevoTorneoOpen(false)}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {/* Nombre */}
+        <input
+          className="w-full border rounded-xl px-3 py-2"
+          placeholder="Nombre del torneo *"
+          value={nt.nombre}
+          onChange={(e) => setNt({ ...nt, nombre: e.target.value })}
+        />
+
+        {/* Categoría */}
+        <select
+          className="w-full border rounded-xl px-3 py-2"
+          value={nt.categoria}
+          onChange={(e) => setNt({ ...nt, categoria: e.target.value })}
+        >
+          <option>Libre</option>
+          <option>Mayores</option>
+          <option>Sub-19</option>
+          {/* agrega más si manejas otras */}
+        </select>
+
+        {/* Tipo de llave (por ahora fija) */}
+        <select
+          className="w-full border rounded-xl px-3 py-2"
+          value={nt.tipoLlave}
+          onChange={(e) => setNt({ ...nt, tipoLlave: e.target.value })}
+        >
+          <option value="eliminacion_simple">Eliminación simple</option>
+        </select>
+
+        {/* Fechas (opcionales) */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-gray-600">Fecha inicio</label>
+            <input
+              type="date"
+              className="w-full border rounded-xl px-3 py-2"
+              value={nt.fechaInicio}
+              onChange={(e) => setNt({ ...nt, fechaInicio: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Fecha fin</label>
+            <input
+              type="date"
+              className="w-full border rounded-xl px-3 py-2"
+              value={nt.fechaFin}
+              onChange={(e) => setNt({ ...nt, fechaFin: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <Button onClick={() => setNuevoTorneoOpen(false)}>Cancelar</Button>
+          <Button className="bg-gray-900 text-white" onClick={crearTorneo} disabled={loading}>
+            Guardar
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
  <InfoDialog
   open={toast.open}
   onClose={() => setToast({ ...toast, open: false })}
