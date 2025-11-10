@@ -2,17 +2,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 /**
- * Panel Liga TTM (Frontend MVP con comentarios)
+ * Panel Liga TTM (Frontend)
  * - Lista torneos (GET /tournaments)
  * - Ver bracket (GET /tournaments/:id/bracket)
  * - Generar llaves (POST /tournaments/:id/generar-llaves)
  * - Resetear bracket (DELETE /tournaments/:id/bracket)
  * - Reportar resultado (POST /matches/:id/resultado)
  * - Ver ranking (GET /ranking?categoria=...)
+ * - CREAR JUGADOR (POST /players)  ← NUEVO
  */
+
 const BASE_URL_DEFAULT = "http://127.0.0.1:4000";
 
-/* ---------------------- utilidades HTTP muy simples ---------------------- */
+/* ------------------------ helpers HTTP sencillos ------------------------ */
 async function apiGet(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(await res.text());
@@ -33,7 +35,7 @@ async function apiDelete(url) {
   return res.json();
 }
 
-/* ------------------------------ átomos de UI ------------------------------ */
+/* ------------------------- componentes base de UI ------------------------ */
 function Button({ children, className = "", ...props }) {
   return (
     <button
@@ -63,18 +65,24 @@ function Badge({ children }) {
   );
 }
 
+/* ------------------------ utilidades de presentación ---------------------- */
+function fmtDate(d) {
+  if (!d) return "Sin fecha";
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? "Sin fecha" : dt.toLocaleDateString();
+}
 
-/* ------------------------------ componente App ------------------------------ */
+/* --------------------------------- APP ---------------------------------- */
 export default function App() {
-  // URL editable de la API (útil si cambia el puerto)
+  // URL de la API (editable en el header)
   const [BASE_URL, setBASE_URL] = useState(BASE_URL_DEFAULT);
 
-  // Estado general
+  // Estado global de la página
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   // Datos
-  const [players, setPlayers] = useState([]); // para nombres en bracket
+  const [players, setPlayers] = useState([]); // para resolver nombres en bracket
   const [tournaments, setTournaments] = useState([]);
   const [selectedTournament, setSelectedTournament] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -82,25 +90,35 @@ export default function App() {
 
   // UI
   const [tab, setTab] = useState("bracket"); // "bracket" | "ranking"
+
+  // Modal de resultado
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMatch, setModalMatch] = useState(null);
   const [scoreA, setScoreA] = useState(3);
   const [scoreB, setScoreB] = useState(1);
 
-  // Mapa rápido id->nombre
+  // -------- NUEVO: modal + formulario para "Crear jugador" ----------
+  const [nuevoJugadorOpen, setNuevoJugadorOpen] = useState(false);
+  const [nj, setNj] = useState({
+    nombre: "",
+    documento: "",
+    edad: "",
+    categoria: "Mayores", // Mayores | Sub-19
+  });
+
+  // Mapa id->nombre para resolver jugadores en el bracket
   const nameById = useMemo(() => {
     const m = new Map();
     for (const p of players) m.set(String(p._id), p.nombre || "(sin nombre)");
     return m;
   }, [players]);
 
-  /* ------------------------------ carga inicial ------------------------------ */
+  /* --------------------------- carga inicial --------------------------- */
   useEffect(() => {
     (async () => {
       try {
         setError("");
         setLoading(true);
-        // Jugadores y torneos al iniciar o cambiar la URL de la API
         const [playersRes, tournamentsRes] = await Promise.all([
           apiGet(`${BASE_URL}/players`),
           apiGet(`${BASE_URL}/tournaments`),
@@ -115,7 +133,7 @@ export default function App() {
     })();
   }, [BASE_URL]);
 
-  /* ------------------------------ helpers por torneo ------------------------------ */
+  /* ---------------------- helpers por torneo activo --------------------- */
   async function loadTournamentData(tournamentObj) {
     setSelectedTournament(tournamentObj);
     setError("");
@@ -168,7 +186,7 @@ export default function App() {
     }
   }
 
-  /* ------------------------------ resultados ------------------------------ */
+  /* --------------------------- resultados --------------------------- */
   function openResultModal(match) {
     setModalMatch(match);
     setScoreA(3);
@@ -177,6 +195,10 @@ export default function App() {
   }
   async function submitResult() {
     if (!modalMatch) return;
+    if (Number(scoreA) === Number(scoreB)) {
+      setError("No se permiten empates."); // validación rápida en front
+      return;
+    }
     try {
       setLoading(true);
       setError("");
@@ -193,7 +215,42 @@ export default function App() {
     }
   }
 
-  /* ------------------------------ helpers UI ------------------------------ */
+  /* ----------------------- NUEVO: crear jugador ----------------------- */
+  async function crearJugador() {
+    // Validaciones mínimas de formulario
+    if (!nj.nombre.trim()) {
+      setError("El nombre es obligatorio.");
+      return;
+    }
+    if (nj.edad !== "" && Number(nj.edad) < 0) {
+      setError("La edad no puede ser negativa.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+
+      await apiPost(`${BASE_URL}/players`, {
+        ...nj,
+        edad: nj.edad === "" ? undefined : Number(nj.edad),
+      });
+
+      // Cierra modal y limpia
+      setNuevoJugadorOpen(false);
+      setNj({ nombre: "", documento: "", edad: "", categoria: "Mayores" });
+
+      // Refresca lista de jugadores (para selects/uso futuro)
+      const playersRes = await apiGet(`${BASE_URL}/players`);
+      setPlayers(playersRes);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* ---------------------------- helpers UI --------------------------- */
   function groupByRound(ms) {
     const by = new Map();
     for (const m of ms) {
@@ -209,13 +266,14 @@ export default function App() {
   const rounds = useMemo(() => groupByRound(matches), [matches]);
   const selectedCategory = selectedTournament?.categoria || "";
 
-  /* --------------------------------- render --------------------------------- */
+  /* -------------------------------- render ------------------------------- */
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      {/* Header con input para la URL de la API */}
+      {/* Header con input de API y botón NUEVO JUGADOR */}
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
           <div className="text-xl font-bold">Liga TTM — Panel</div>
+
           <div className="ml-auto flex items-center gap-2">
             <input
               className="border rounded-xl px-3 py-1 text-sm w-[320px]"
@@ -225,13 +283,18 @@ export default function App() {
               title="URL de tu API"
             />
             <Badge>API</Badge>
+
+            {/* NUEVO: abre modal de “Crear jugador” */}
+            <Button onClick={() => setNuevoJugadorOpen(true)} disabled={loading}>
+              Nuevo jugador
+            </Button>
           </div>
         </div>
       </header>
 
-      {/* Layout 12 columnas: sidebar + contenido */}
+      {/* Layout principal: sidebar (torneos) + contenido */}
       <main className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-12 gap-4">
-        {/* Sidebar: torneos */}
+        {/* Sidebar: lista de torneos */}
         <aside className="col-span-12 md:col-span-3">
           <Card title="Torneos">
             <div className="flex flex-col gap-2">
@@ -254,7 +317,7 @@ export default function App() {
                   <div className="flex flex-col items-start">
                     <span className="font-medium">{t.nombre}</span>
                     <span className="text-xs opacity-70">
-                      {t.categoria} · {new Date(t.createdAt).toLocaleDateString()}
+                      {t.categoria} · {fmtDate(t.fechaInicio)}
                     </span>
                   </div>
                 </Button>
@@ -283,8 +346,14 @@ export default function App() {
               <>
                 <Badge>Categoria: {selectedCategory || "—"}</Badge>
                 <div className="ml-auto flex items-center gap-2">
-                  <Button onClick={handleGenerarLlaves}>Generar llaves</Button>
-                  <Button className="text-red-600" onClick={handleResetBracket}>
+                  <Button onClick={handleGenerarLlaves} disabled={loading}>
+                    Generar llaves
+                  </Button>
+                  <Button
+                    className="text-red-600"
+                    onClick={handleResetBracket}
+                    disabled={loading}
+                  >
                     Resetear bracket
                   </Button>
                 </div>
@@ -294,7 +363,7 @@ export default function App() {
             {loading && <span className="ml-2 text-sm">Cargando…</span>}
           </div>
 
-          {/* Errores del backend */}
+          {/* Errores (texto plano para debug rápido) */}
           {error && (
             <Card>
               <div className="text-sm text-red-600 whitespace-pre-wrap">
@@ -303,7 +372,7 @@ export default function App() {
             </Card>
           )}
 
-          {/* Si no hay torneo seleccionado */}
+          {/* Mensaje si no hay torneo seleccionado */}
           {!selectedTournament && (
             <Card>
               <div className="text-sm text-gray-600">
@@ -371,6 +440,7 @@ export default function App() {
                                 <Button
                                   className="ml-auto"
                                   onClick={() => openResultModal(m)}
+                                  disabled={loading}
                                 >
                                   Cargar resultado
                                 </Button>
@@ -427,7 +497,7 @@ export default function App() {
         </section>
       </main>
 
-      {/* Modal de resultado */}
+      {/* MODAL: Cargar resultado */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
@@ -470,6 +540,73 @@ export default function App() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: NUEVO JUGADOR  ← NUEVO */}
+      {nuevoJugadorOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-lg">Nuevo jugador</h3>
+              <button
+                className="text-gray-500"
+                onClick={() => {
+                  setNuevoJugadorOpen(false);
+                  // opcional: resetear al cancelar
+                  // setNj({ nombre:"", documento:"", edad:"", categoria:"Mayores" });
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                className="w-full border rounded-xl px-3 py-2"
+                placeholder="Nombre completo *"
+                value={nj.nombre}
+                onChange={(e) => setNj({ ...nj, nombre: e.target.value })}
+              />
+              <input
+                className="w-full border rounded-xl px-3 py-2"
+                placeholder="Documento"
+                value={nj.documento}
+                onChange={(e) => setNj({ ...nj, documento: e.target.value })}
+              />
+              <input
+                type="number"
+                className="w-full border rounded-xl px-3 py-2"
+                placeholder="Edad"
+                value={nj.edad}
+                onChange={(e) => setNj({ ...nj, edad: e.target.value })}
+              />
+              <select
+                className="w-full border rounded-xl px-3 py-2"
+                value={nj.categoria}
+                onChange={(e) => setNj({ ...nj, categoria: e.target.value })}
+              >
+               <option>Master</option>
+                <option>Mayores</option>
+                <option>Sub-21</option>
+                <option>Sub-19</option>
+                <option>Sub-15</option>
+                <option>Sub-13</option>
+               
+              </select>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button onClick={() => setNuevoJugadorOpen(false)}>Cancelar</Button>
+                <Button
+                  className="bg-gray-900 text-white"
+                  onClick={crearJugador}
+                  disabled={loading}
+                >
+                  Crear
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
