@@ -214,4 +214,18 @@ router.get('/ranking', async (req, res) => {
   res.json(tabla);
 });
 
+// Listar torneos
+router.get('/tournaments', async (_req, res) => {
+  const ts = await Tournament.find().sort({ createdAt: -1 }).lean();
+  res.json(ts);
+});
+
+// Detalle de un torneo (con jugadores inscritos)
+router.get('/tournaments/:id', async (req, res) => {
+  const t = await Tournament.findById(req.params.id).populate('jugadoresInscritos').lean();
+  if (!t) return res.status(404).json({ error: 'Torneo no encontrado' });
+  res.json(t);
+});
+
+
 module.exports = router;
