@@ -64,6 +64,36 @@ function Badge({ children }) {
     </span>
   );
 }
+/* --- Diálogo simple para notificaciones (éxito / alerta / error) --- */
+function InfoDialog({ open, onClose, title, message, tone = "default" }) {
+  if (!open) return null;
+  const toneClasses =
+    tone === "success"
+      ? "border-emerald-300"
+      : tone === "warn"
+      ? "border-amber-300"
+      : tone === "error"
+      ? "border-rose-300"
+      : "border-gray-200";
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+      <div className={`bg-white rounded-2xl border ${toneClasses} shadow-xl w-full max-w-md p-5`}>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-lg">{title}</h3>
+          <button className="text-gray-500" onClick={onClose}>✕</button>
+        </div>
+        <p className="text-sm text-gray-700 whitespace-pre-wrap">{message}</p>
+        <div className="flex justify-end mt-4">
+          <button className="rounded-2xl border px-3 py-2 shadow-sm bg-gray-900 text-white" onClick={onClose}>
+            Aceptar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /* ------------------------ utilidades de presentación ---------------------- */
 function fmtDate(d) {
@@ -105,6 +135,15 @@ export default function App() {
     edad: "",
     categoria: "Mayores", // Mayores | Sub-19
   });
+
+  // Diálogo de notificación (éxito/alerta/error)
+const [toast, setToast] = useState({
+  open: false,
+  title: "",
+  message: "",
+  tone: "default", // "success" | "warn" | "error" | "default"
+});
+
 
   // Mapa id->nombre para resolver jugadores en el bracket
   const nameById = useMemo(() => {
@@ -216,39 +255,71 @@ export default function App() {
   }
 
   /* ----------------------- NUEVO: crear jugador ----------------------- */
-  async function crearJugador() {
-    // Validaciones mínimas de formulario
-    if (!nj.nombre.trim()) {
-      setError("El nombre es obligatorio.");
-      return;
-    }
-    if (nj.edad !== "" && Number(nj.edad) < 0) {
-      setError("La edad no puede ser negativa.");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-
-      await apiPost(`${BASE_URL}/players`, {
-        ...nj,
-        edad: nj.edad === "" ? undefined : Number(nj.edad),
-      });
-
-      // Cierra modal y limpia
-      setNuevoJugadorOpen(false);
-      setNj({ nombre: "", documento: "", edad: "", categoria: "Mayores" });
-
-      // Refresca lista de jugadores (para selects/uso futuro)
-      const playersRes = await apiGet(`${BASE_URL}/players`);
-      setPlayers(playersRes);
-    } catch (e) {
-      setError(String(e.message || e));
-    } finally {
-      setLoading(false);
-    }
+ async function crearJugador() {
+  // Validaciones mínimas de formulario (front)
+  if (!nj.nombre.trim()) {
+    setToast({
+      open: true,
+      title: "Faltan datos",
+      message: "El nombre es obligatorio.",
+      tone: "warn",
+    });
+    return;
   }
+  if (nj.edad !== "" && Number(nj.edad) < 0) {
+    setToast({
+      open: true,
+      title: "Edad inválida",
+      message: "La edad no puede ser negativa.",
+      tone: "warn",
+    });
+    return;
+  }
+
+  try {
+    setLoading(true);
+    setError("");
+
+    await apiPost(`${BASE_URL}/players`, {
+      ...nj,
+      edad: nj.edad === "" ? undefined : Number(nj.edad),
+    });
+
+    // Cierra modal y limpia
+    setNuevoJugadorOpen(false);
+    setNj({ nombre: "", documento: "", edad: "", categoria: "Mayores" });
+
+    // Refresca lista de jugadores
+    const playersRes = await apiGet(`${BASE_URL}/players`);
+    setPlayers(playersRes);
+
+    // Éxito
+    setToast({
+      open: true,
+      title: "Jugador creado",
+      message: "Jugador creado con éxito.",
+      tone: "success",
+    });
+  } catch (e) {
+    // Detecta duplicado por mensaje del backend
+    const raw = String(e.message || e).toLowerCase();
+    const isDuplicate =
+      raw.includes("duplicate key") ||
+      raw.includes("e11000") ||
+      raw.includes("ya existe") ||
+      raw.includes("existe");
+
+    setToast({
+      open: true,
+      title: isDuplicate ? "Jugador existente" : "Error al crear jugador",
+      message: isDuplicate ? "Este jugador ya existe." : String(e.message || e),
+      tone: isDuplicate ? "warn" : "error",
+    });
+  } finally {
+    setLoading(false);
+  }
+}
+
 
   /* ---------------------------- helpers UI --------------------------- */
   function groupByRound(ms) {
@@ -609,7 +680,16 @@ export default function App() {
             </div>
           </div>
         </div>
+        
       )}
+ <InfoDialog
+  open={toast.open}
+  onClose={() => setToast({ ...toast, open: false })}
+  title={toast.title}
+  message={toast.message}
+  tone={toast.tone}
+/>
+
     </div>
   );
 }

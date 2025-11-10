@@ -15,9 +15,13 @@ router.get('/health', (_req, res) => res.json({ ok: true }));
 router.post('/players', async (req, res) => {
   try {
     const player = await Player.create(req.body);
-    res.json(player);
+    return res.json(player);
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    // Si el índice único dispara, Mongo/Mongoose dan code 11000 (duplicate key)
+    if (e && e.code === 11000) {
+      return res.status(409).json({ error: 'Este jugador ya existe', code: 'DUPLICATE' });
+    }
+    return res.status(400).json({ error: e.message });
   }
 });
 
@@ -25,6 +29,7 @@ router.get('/players', async (_req, res) => {
   const players = await Player.find().sort({ nombre: 1 });
   res.json(players);
 });
+
 
 // -------------------- Torneos --------------------
 router.post('/tournaments', async (req, res) => {

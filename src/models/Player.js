@@ -8,7 +8,7 @@ const HistorialSchema = new Schema({
 
 const PlayerSchema = new Schema({
   nombre: String,
-  documento: String,
+  documento: { type: String, trim: true, unique: true }, // ← único
   edad: Number,
   categoria: String, // ej: "Mayores", "Sub-19"
   clubId: { type: Schema.Types.ObjectId, ref: 'Club' },
