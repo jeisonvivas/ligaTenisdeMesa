@@ -137,22 +137,27 @@ export default function App() {
   });
 
   // Diálogo de notificación (éxito/alerta/error)
-const [toast, setToast] = useState({
+  const [toast, setToast] = useState({
   open: false,
   title: "",
   message: "",
   tone: "default", // "success" | "warn" | "error" | "default"
-});
+  });
 
-// --- Nuevo torneo (modal + formulario) ---
-const [nuevoTorneoOpen, setNuevoTorneoOpen] = useState(false);
-const [nt, setNt] = useState({
-  nombre: "",
-  categoria: "Mayores",              // Mayores | Sub-19 (ajusta a tus categorías)
-  tipoLlave: "eliminacion_simple",   // por ahora solo este tipo
-  fechaInicio: "",                    // yyyy-mm-dd
-  fechaFin: ""                        // yyyy-mm-dd
-});
+ // --- Nuevo torneo (modal + formulario) ---
+  const [nuevoTorneoOpen, setNuevoTorneoOpen] = useState(false);
+  const [nt, setNt] = useState({
+    nombre: "",
+    categoria: "Mayores",              // Mayores | Sub-19 (ajusta a tus categorías)
+    tipoLlave: "eliminacion_simple",   // por ahora solo este tipo
+    fechaInicio: "",                    // yyyy-mm-dd
+    fechaFin: ""                        // yyyy-mm-dd
+  });
+
+  // --- Inscribir jugador en el torneo seleccionado ---
+  const [inscribirOpen, setInscribirOpen] = useState(false);
+  const [inscribirPlayerId, setInscribirPlayerId] = useState("");
+
 
 
 
@@ -163,15 +168,15 @@ const [nt, setNt] = useState({
     return m;
   }, [players]);
 
-  // --- Búsqueda de jugadores para la tarjeta ---
-const [playerQuery, setPlayerQuery] = useState("");
+    // --- Búsqueda de jugadores para la tarjeta ---
+  const [playerQuery, setPlayerQuery] = useState("");
 
-// Lista filtrada por nombre (insensible a mayúsculas)
-const filteredPlayers = React.useMemo(() => {
-  const q = playerQuery.trim().toLowerCase();
-  if (!q) return players;
-  return players.filter(p => (p.nombre || "").toLowerCase().includes(q));
-}, [players, playerQuery]);
+  // Lista filtrada por nombre (insensible a mayúsculas)
+  const filteredPlayers = React.useMemo(() => {
+    const q = playerQuery.trim().toLowerCase();
+    if (!q) return players;
+    return players.filter(p => (p.nombre || "").toLowerCase().includes(q));
+  }, [players, playerQuery]);
 
 
   /* --------------------------- carga inicial --------------------------- */
@@ -248,37 +253,81 @@ const filteredPlayers = React.useMemo(() => {
   }
 
   // Vuelve a cargar la lista de jugadores desde la API
-async function reloadPlayers() {
-  try {
-    setLoading(true);
-    setError("");
-    const playersRes = await apiGet(`${BASE_URL}/players`); // GET /players
-    setPlayers(playersRes);
-  } catch (e) {
-    setError(String(e.message || e));
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function reloadTournaments(selectNewest = false) {
-  try {
-    setLoading(true);
-    setError("");
-    const tournamentsRes = await apiGet(`${BASE_URL}/tournaments`);
-    setTournaments(tournamentsRes);
-
-    if (selectNewest && tournamentsRes.length > 0) {
-      // Asumiendo que vienen ordenados por createdAt desc (tu API lo hace)
-      const newest = tournamentsRes[0];
-      await loadTournamentData(newest);
+  async function reloadPlayers() {
+    try {
+      setLoading(true);
+      setError("");
+      const playersRes = await apiGet(`${BASE_URL}/players`); // GET /players
+      setPlayers(playersRes);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setLoading(false);
     }
-  } catch (e) {
-    setError(String(e.message || e));
-  } finally {
-    setLoading(false);
   }
-}
+
+  async function reloadTournaments(selectNewest = false) {
+    try {
+      setLoading(true);
+      setError("");
+      const tournamentsRes = await apiGet(`${BASE_URL}/tournaments`);
+      setTournaments(tournamentsRes);
+
+      if (selectNewest && tournamentsRes.length > 0) {
+        // Asumiendo que vienen ordenados por createdAt desc (tu API lo hace)
+        const newest = tournamentsRes[0];
+        await loadTournamentData(newest);
+      }
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function inscribirJugador() {
+    // Validaciones rápidas en front
+    if (!selectedTournament) {
+      setToast({ open: true, title: "Selecciona un torneo", message: "Debes seleccionar un torneo para inscribir jugadores.", tone: "warn" });
+      return;
+    }
+    if (!inscribirPlayerId) {
+      setToast({ open: true, title: "Faltan datos", message: "Selecciona un jugador.", tone: "warn" });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+
+      // POST /tournaments/:id/inscribir  { playerId }
+      await apiPost(`${BASE_URL}/tournaments/${selectedTournament._id}/inscribir`, {
+        playerId: inscribirPlayerId
+      });
+
+      // Cierra modal y limpia selección
+      setInscribirOpen(false);
+      setInscribirPlayerId("");
+
+      // Refresca datos del torneo actual (para que luego “Generar llaves” tenga el listado al día)
+      await loadTournamentData(selectedTournament);
+
+      setToast({ open: true, title: "Inscripción exitosa", message: "Jugador inscrito en el torneo.", tone: "success" });
+    } catch (e) {
+      // Tu backend devuelve 400 con { error: 'Jugador ya inscrito' } si está repetido
+      const raw = String(e.message || "").toLowerCase();
+      const yaInscrito = raw.includes("ya inscrito");
+      setToast({
+        open: true,
+        title: yaInscrito ? "Ya inscrito" : "Error al inscribir",
+        message: yaInscrito ? "Este jugador ya está inscrito en el torneo." : String(e.message || e),
+        tone: yaInscrito ? "warn" : "error",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
 
 
 
@@ -672,39 +721,65 @@ async function crearTorneo() {
               )}
             </Card>
           )}
-      {/* TARJETA: Lista de jugadores (vista rápida) */}
-       <Card title="Jugadores (vista rápida)">
-        <div className="flex items-center gap-2 mb-3">
-          <input
-            className="border rounded-xl px-3 py-2 text-sm"
-            placeholder="Buscar jugador por nombre…"
-            value={playerQuery}
-            onChange={(e) => setPlayerQuery(e.target.value)}
-          />
-          <Button onClick={reloadPlayers} disabled={loading}>Refrescar</Button>
-          <Badge>{players.length} jugadores</Badge>
-        </div>
+   {/* PESTAÑA: JUGADORES */}
+  {tab === "jugadores" && (
+    <Card title="Jugadores">
+      <div className="flex items-center gap-2 mb-3">
+        <input
+          className="border rounded-xl px-3 py-2 text-sm"
+          placeholder="Buscar jugador por nombre…"
+          value={playerQuery}
+          onChange={(e) => setPlayerQuery(e.target.value)}
+        />
+        <Button onClick={reloadPlayers} disabled={loading}>Refrescar</Button>
+        <Badge>{players.length} jugadores</Badge>
 
-        {filteredPlayers.length === 0 ? (
-          <div className="text-sm text-gray-500">No se encontraron jugadores.</div>
-        ) : (
-          <ul className="text-sm max-h-64 overflow-auto divide-y">
-            {filteredPlayers.map(p => (
-              <li key={p._id} className="py-2 flex items-center justify-between">
-                <span>
-                  {p.nombre}
-                  {p.categoria ? <span className="text-gray-500"> · {p.categoria}</span> : null}
-                </span>
-                {/* opcional: muestra documento si existe */}
-                {p.documento ? <span className="text-xs text-gray-500">{p.documento}</span> : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+        {/*   botón que abre el modal de Inscribir */}
+        <Button
+          onClick={() => {
+            if (!selectedTournament) {
+              setToast({
+                open: true,
+                title: "Selecciona un torneo",
+                message: "Elige un torneo en la izquierda para inscribir.",
+                tone: "warn",
+              });
+            } else {
+              setInscribirOpen(true);     // abre el modal
+            }
+          }}
+          disabled={loading}
+        >
+          Inscribir en torneo
+        </Button>
+      </div>
 
+      {filteredPlayers.length === 0 ? (
+        <div className="text-sm text-gray-500">No se encontraron jugadores.</div>
+      ) : (
+        <ul className="text-sm max-h-64 overflow-auto divide-y">
+          {filteredPlayers.map(p => (
+            <li key={p._id} className="py-2 flex items-center justify-between">
+              <span>
+                {p.nombre}
+                {p.categoria ? <span className="text-gray-500"> · {p.categoria}</span> : null}
+              </span>
+              {p.documento ? <span className="text-xs text-gray-500">{p.documento}</span> : null}
+
+              {/* (Opcional) Inscribir directo por jugador */}
+              {/* <Button onClick={() => { setInscribirPlayerId(p._id); setInscribirOpen(true); }}>
+                Inscribir
+              </Button> */}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )}
         </section>
       </main>
+
+      
 
       {/* MODAL: Cargar resultado */}
       {modalOpen && (
@@ -821,6 +896,8 @@ async function crearTorneo() {
         
       )}
 
+      {/* MODAL: NUEVO TORNEO  --- */}
+
       {nuevoTorneoOpen && (
   <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
@@ -896,6 +973,45 @@ async function crearTorneo() {
     </div>
   </div>
 )}
+      {/* MODAL: INSCRIBIR JUGADOR EN TORNEO */}
+
+{inscribirOpen && (
+  <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-lg">
+          Inscribir jugador {selectedTournament ? `— ${selectedTournament.nombre}` : ""}
+        </h3>
+        <button className="text-gray-500" onClick={() => setInscribirOpen(false)}>✕</button>
+      </div>
+
+      <div className="space-y-3">
+        <select
+          className="w-full border rounded-xl px-3 py-2"
+          value={inscribirPlayerId}
+          onChange={(e) => setInscribirPlayerId(e.target.value)}
+        >
+          <option value="">Selecciona un jugador…</option>
+          {filteredPlayers.map(p => (
+            <option key={p._id} value={p._id}>{p.nombre}</option>
+          ))}
+        </select>
+
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <Button onClick={() => setInscribirOpen(false)}>Cancelar</Button>
+          <Button
+            className="bg-gray-900 text-white"
+            onClick={inscribirJugador}
+            disabled={loading || !inscribirPlayerId}
+          >
+            Inscribir
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
 
  <InfoDialog
   open={toast.open}
