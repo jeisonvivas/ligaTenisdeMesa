@@ -154,12 +154,23 @@ export default function App() {
     fechaFin: ""                        // yyyy-mm-dd
   });
 
-  // --- Inscribir jugador en el torneo seleccionado ---
+  // Modal para inscribir jugador
   const [inscribirOpen, setInscribirOpen] = useState(false);
   const [inscribirPlayerId, setInscribirPlayerId] = useState("");
 
 
-
+  // --- Inscribir jugador en el torneo seleccionado ---
+  // IDs de jugadores ya inscritos en el torneo seleccionado
+ const inscritosIds = useMemo(() => {
+  if (!selectedTournament || !Array.isArray(selectedTournament.jugadoresInscritos)) {
+    return new Set();
+  }
+  return new Set(
+    selectedTournament.jugadoresInscritos.map((j) =>
+      String(j._id || j)      // sirve si vienen populados o como ObjectId plano
+    )
+  );
+ }, [selectedTournament]);
 
   // Mapa id->nombre para resolver jugadores en el bracket
   const nameById = useMemo(() => {
@@ -200,26 +211,36 @@ export default function App() {
   }, [BASE_URL]);
 
   /* ---------------------- helpers por torneo activo --------------------- */
-  async function loadTournamentData(tournamentObj) {
-    setSelectedTournament(tournamentObj);
-    setError("");
-    setLoading(true);
-    try {
-      const bracket = await apiGet(
-        `${BASE_URL}/tournaments/${tournamentObj._id}/bracket`
-      );
-      setMatches(bracket);
-      const cat = tournamentObj.categoria || "";
-      const rk = await apiGet(
-        `${BASE_URL}/ranking?categoria=${encodeURIComponent(cat)}`
-      );
-      setRanking(rk);
-    } catch (e) {
-      setError(String(e.message || e));
-    } finally {
-      setLoading(false);
-    }
+ async function loadTournamentData(tournamentObj) {
+  setError("");
+  setLoading(true);
+  try {
+    // 1) Traer detalle del torneo (con jugadores inscritos populados)
+    const torneoDetalle = await apiGet(
+      `${BASE_URL}/tournaments/${tournamentObj._id}`
+    );
+
+    // 2) Bracket
+    const bracket = await apiGet(
+      `${BASE_URL}/tournaments/${tournamentObj._id}/bracket`
+    );
+
+    // 3) Ranking
+    const cat = torneoDetalle.categoria || "";
+    const rk = await apiGet(
+      `${BASE_URL}/ranking?categoria=${encodeURIComponent(cat)}`
+    );
+
+    setSelectedTournament(torneoDetalle);
+    setMatches(bracket);
+    setRanking(rk);
+  } catch (e) {
+    setError(String(e.message || e));
+  } finally {
+    setLoading(false);
   }
+}
+
 
   async function handleGenerarLlaves() {
     if (!selectedTournament) return;
@@ -764,20 +785,31 @@ async function crearTorneo() {
         <div className="text-sm text-gray-500">No se encontraron jugadores.</div>
       ) : (
         <ul className="text-sm max-h-64 overflow-auto divide-y">
-          {filteredPlayers.map(p => (
+         {filteredPlayers.map((p) => {
+          const yaInscrito = inscritosIds.has(String(p._id));
+          return (
             <li key={p._id} className="py-2 flex items-center justify-between">
-              <span>
-                {p.nombre}
-                {p.categoria ? <span className="text-gray-500"> · {p.categoria}</span> : null}
+              <span className="flex items-center gap-2">
+                <span>
+                  {p.nombre}
+                  {p.categoria ? (
+                    <span className="text-gray-500"> · {p.categoria}</span>
+                  ) : null}
+                </span>
+                {selectedTournament && yaInscrito && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                    Inscrito en {selectedTournament.nombre}
+                  </span>
+                )}
               </span>
-              {p.documento ? <span className="text-xs text-gray-500">{p.documento}</span> : null}
 
-              {/* (Opcional) Inscribir directo por jugador */}
-              {/* <Button onClick={() => { setInscribirPlayerId(p._id); setInscribirOpen(true); }}>
-                Inscribir
-              </Button> */}
+              {p.documento && (
+                <span className="text-xs text-gray-500">{p.documento}</span>
+              )}
             </li>
-          ))}
+          );
+        })}
+
         </ul>
       )}
     </Card>
@@ -993,15 +1025,26 @@ async function crearTorneo() {
 
       <div className="space-y-3">
         <select
-          className="w-full border rounded-xl px-3 py-2"
-          value={inscribirPlayerId}
-          onChange={(e) => setInscribirPlayerId(e.target.value)}
-        >
-          <option value="">Selecciona un jugador…</option>
-          {filteredPlayers.map(p => (
-            <option key={p._id} value={p._id}>{p.nombre}</option>
-          ))}
-        </select>
+        className="w-full border rounded-xl px-3 py-2"
+        value={inscribirPlayerId}
+        onChange={(e) => setInscribirPlayerId(e.target.value)}
+      >
+        <option value="">Selecciona un jugador…</option>
+        {filteredPlayers.map((p) => {
+          const yaInscrito = inscritosIds.has(String(p._id));
+          return (
+            <option
+              key={p._id}
+              value={p._id}
+              disabled={yaInscrito}   // 👈 no deja seleccionarlo
+            >
+              {p.nombre}
+              {yaInscrito ? " (ya inscrito)" : ""}
+            </option>
+          );
+        })}
+      </select>
+
 
         <div className="flex items-center justify-end gap-2 pt-2">
           <Button onClick={() => setInscribirOpen(false)}>Cancelar</Button>
