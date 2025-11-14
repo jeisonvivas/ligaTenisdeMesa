@@ -1,5 +1,7 @@
 // src/App.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import logoLiga from "./assets/logo-liga-meta.png";
+
 
 /**
  * Panel Liga TTM (Frontend)
@@ -26,9 +28,21 @@ async function apiPost(url, body) {
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(await res.text());
+
+  if (!res.ok) {
+    let msg = "Error en la petición";
+    try {
+      const data = await res.json();
+      msg = data.error || data.message || msg;
+    } catch {
+      msg = await res.text();
+    }
+    throw new Error(msg);
+  }
+
   return res.json();
 }
+
 async function apiDelete(url) {
   const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) throw new Error(await res.text());
@@ -243,20 +257,45 @@ export default function App() {
 
 
   async function handleGenerarLlaves() {
-    if (!selectedTournament) return;
-    try {
-      setLoading(true);
-      setError("");
-      await apiPost(
-        `${BASE_URL}/tournaments/${selectedTournament._id}/generar-llaves`
-      );
-      await loadTournamentData(selectedTournament);
-    } catch (e) {
-      setError(String(e.message || e));
-    } finally {
-      setLoading(false);
-    }
+  if (!selectedTournament) return;
+
+  try {
+    setLoading(true);
+    setError("");
+
+    await apiPost(
+      `${BASE_URL}/tournaments/${selectedTournament._id}/generar-llaves`
+    );
+
+    await loadTournamentData(selectedTournament);
+
+    // Éxito
+    setToast({
+      open: true,
+      title: "Llaves generadas",
+      message: "Se generó el cuadro del torneo correctamente.",
+      tone: "success",
+    });
+  } catch (e) {
+    const msg = String(e.message || e);
+    const pocosJugadores = msg.toLowerCase().includes("al menos 2 jugadores");
+
+    setToast({
+      open: true,
+      title: pocosJugadores
+        ? "No hay suficientes jugadores"
+        : "Error al generar llaves",
+      message: msg, // aquí verás "Se necesitan al menos 2 jugadores"
+      tone: pocosJugadores ? "warn" : "error",
+    });
+
+    // ya NO usamos setError aquí para no pintar el JSON rojo
+    // setError(msg); <-- lo dejamos fuera a propósito
+  } finally {
+    setLoading(false);
   }
+}
+
 
   async function handleResetBracket() {
     if (!selectedTournament) return;
@@ -360,27 +399,56 @@ export default function App() {
     setScoreB(1);
     setModalOpen(true);
   }
-  async function submitResult() {
+ async function submitResult() {
     if (!modalMatch) return;
+
+    // Validación previa: no permitir empates
     if (Number(scoreA) === Number(scoreB)) {
-      setError("No se permiten empates."); // validación rápida en front
+      setToast({
+        open: true,
+        title: "Marcador no válido",
+        message: "No puede haber empate: ajusta el resultado.",
+        tone: "warn",
+      });
       return;
     }
+
     try {
       setLoading(true);
       setError("");
+
       await apiPost(`${BASE_URL}/matches/${modalMatch._id}/resultado`, {
         a: Number(scoreA),
         b: Number(scoreB),
       });
+
       setModalOpen(false);
+
+      setToast({
+        open: true,
+        title: "Resultado guardado",
+        message: "El marcador se registró correctamente.",
+        tone: "success",
+      });
+
       if (selectedTournament) await loadTournamentData(selectedTournament);
     } catch (e) {
-      setError(String(e.message || e));
+      const msg = String(e.message || e);
+
+      setToast({
+        open: true,
+        title: "Error al guardar resultado",
+        message: msg, // aquí llegaría "No puede haber empate..." si viene del backend
+        tone: "error",
+      });
+
+      // 👇 ya NO usamos setError aquí, así que no sale JSON rojo
+      // setError(msg);
     } finally {
       setLoading(false);
     }
-  }
+}
+
 
   /* ----------------------- NUEVO: crear jugador ----------------------- */
  async function crearJugador() {
@@ -510,6 +578,11 @@ async function crearTorneo() {
       {/* Header con input de API y botón NUEVO JUGADOR */}
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+         <img
+          src={logoLiga}
+          alt="Liga de Tenis de Mesa Meta"
+          className="h-10 w-10 rounded-full object-contain"
+          />
           <div className="text-xl font-bold">Liga TTM — Panel</div>
 
           <div className="ml-auto flex items-center gap-2">
@@ -837,21 +910,36 @@ async function crearTorneo() {
                 <div className="grid grid-cols-2 gap-3 items-end">
                   <div>
                     <div className="text-sm mb-1 font-medium">A</div>
-                    <input
+                   <input
                       type="number"
-                      className="w-full border rounded-xl px-3 py-2"
+                      min={0}
+                      max={4}
+                      className="w-full border rounded-xl px-3 py-2 text-lg"
                       value={scoreA}
-                      onChange={(e) => setScoreA(e.target.value)}
+                      onChange={(e) => {
+                        let v = parseInt(e.target.value, 10);
+                        if (Number.isNaN(v)) v = 0;
+                        if (v < 0) v = 0;
+                        if (v > 4) v = 4;
+                        setScoreA(v);
+                    }}
                     />
-                  </div>
-                  <div>
-                    <div className="text-sm mb-1 font-medium">B</div>
-                    <input
-                      type="number"
-                      className="w-full border rounded-xl px-3 py-2"
-                      value={scoreB}
-                      onChange={(e) => setScoreB(e.target.value)}
-                    />
+
+                  <input
+                    type="number"
+                    min={0}
+                    max={4}
+                    className="w-full border rounded-xl px-3 py-2 text-lg"
+                    value={scoreB}
+                    onChange={(e) => {
+                      let v = parseInt(e.target.value, 10);
+                      if (Number.isNaN(v)) v = 0;
+                      if (v < 0) v = 0;
+                      if (v > 4) v = 4;
+                      setScoreB(v);
+                    }}
+                  />
+
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-2">
