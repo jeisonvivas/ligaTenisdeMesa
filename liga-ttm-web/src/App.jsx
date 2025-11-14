@@ -662,21 +662,27 @@ async function crearTorneo() {
                               <div className="text-sm">{m.marcador?.b ?? 0}</div>
                             </div>
                             <div className="mt-2 flex items-center gap-2">
-                              {ganador && <Badge>Ganador: {ganador}</Badge>}
-                              {!isPlayed && isComplete && (
-                                <Button
-                                  className="ml-auto"
-                                  onClick={() => openResultModal(m)}
-                                  disabled={loading}
-                                >
-                                  Cargar resultado
-                                </Button>
-                              )}
-                              {!isComplete && (
-                                <span className="text-xs text-gray-500 ml-auto">
-                                  Pendiente
-                                </span>
-                              )}
+                             {ganador && (
+                              <Badge>
+                                Ganador: {ganador}
+                                {(!m.jugadorA || !m.jugadorB) && " (BYE)"}
+                              </Badge>
+                            )}
+                            {!isPlayed && isComplete && (
+                              <Button
+                                className="ml-auto"
+                                onClick={() => openResultModal(m)}
+                                disabled={loading}
+                              >
+                                Cargar resultado
+                              </Button>
+                            )}
+                            {!isComplete && !ganador && (
+                              <span className="text-xs text-gray-500 ml-auto">
+                                Pendiente
+                              </span>
+                            )}
+
                             </div>
                           </div>
                         );

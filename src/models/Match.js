@@ -80,26 +80,42 @@ MatchSchema.pre('validate', function (next) {
 
   // Reglas cuando el partido está marcado como jugado
   if (this.estado === 'jugado') {
-    if (!this.jugadorA || !this.jugadorB) {
-      return next(new Error('Partido incompleto: faltan jugadores para marcar como jugado'));
-    }
+  const faltaAlgunJugador = !this.jugadorA || !this.jugadorB;
 
-    if (this.marcador.a === this.marcador.b) {
-      return next(new Error('No puede haber empate en un partido jugado'));
-    }
-
+  // 🔹 Caso especial: victoria por BYE / WO
+  if (faltaAlgunJugador) {
     if (!this.ganadorId) {
       return next(new Error('Debe establecerse ganadorId cuando el partido está jugado'));
     }
 
-    const ganadorEsAOB =
-      String(this.ganadorId) === String(this.jugadorA) ||
-      String(this.ganadorId) === String(this.jugadorB);
-
-    if (!ganadorEsAOB) {
-      return next(new Error('ganadorId debe ser jugadorA o jugadorB'));
+    // El ganador debe ser el único jugador presente
+    const idPresente = this.jugadorA || this.jugadorB;
+    if (String(this.ganadorId) !== String(idPresente)) {
+      return next(new Error('En un BYE el ganador debe ser el único jugador presente'));
     }
+
+    // No validamos marcador ni nada más para este caso
+    return next();
   }
+
+  // 🔹 Partidos normales (dos jugadores)
+  if (this.marcador.a === this.marcador.b) {
+    return next(new Error('No puede haber empate en un partido jugado'));
+  }
+
+  if (!this.ganadorId) {
+    return next(new Error('Debe establecerse ganadorId cuando el partido está jugado'));
+  }
+
+  const ganadorEsAOB =
+    String(this.ganadorId) === String(this.jugadorA) ||
+    String(this.ganadorId) === String(this.jugadorB);
+
+  if (!ganadorEsAOB) {
+    return next(new Error('ganadorId debe ser jugadorA o jugadorB'));
+  }
+}
+
 
   next();
 });

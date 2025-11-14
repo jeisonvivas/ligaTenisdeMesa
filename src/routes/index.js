@@ -84,9 +84,16 @@ router.post('/tournaments/:id/generar-llaves', async (req, res) => {
     const categoria = t.categoria;
     const inscritos = t.jugadoresInscritos;
 
+    // 👇 nuevo
+    await Match.deleteMany({ torneoId: t._id, categoria });
+    t.estado = 'creado';
+    t.ganador = null;
+    await t.save();
+
     if (inscritos.length < 2) {
       return res.status(400).json({ error: 'Se necesitan al menos 2 jugadores' });
     }
+
 
     // Siembra: rankingActual desc, luego nombre asc
     inscritos.sort((a, b) =>
@@ -231,6 +238,33 @@ router.get('/tournaments/:id', async (req, res) => {
   if (!t) return res.status(404).json({ error: 'Torneo no encontrado' });
   res.json(t);
 });
+
+
+//  resetear el bracket de un torneo
+router.delete('/tournaments/:id/bracket', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const t = await Tournament.findById(id);
+    if (!t) {
+      return res.status(404).json({ error: 'Torneo no encontrado' });
+    }
+
+    // Borrar todos los partidos del torneo
+    await Match.deleteMany({ torneoId: t._id });
+
+    // Opcional: resetear estado y ganador
+    t.estado = 'creado';
+    t.ganador = null;
+    await t.save();
+
+    return res.json({ ok: true, msg: 'Bracket reseteado correctamente' });
+  } catch (error) {
+    console.error('Error al resetear bracket:', error);
+    return res.status(500).json({ error: 'Error interno al resetear bracket' });
+  }
+});
+
 
 
 module.exports = router;
